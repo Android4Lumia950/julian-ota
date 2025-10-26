@@ -1,0 +1,81 @@
+name: OTA Release Automation
+
+on:
+  push:
+    paths:
+      - 'builds/**'   # Trigger when a new ZIP is added here
+    branches:
+      - main
+
+jobs:
+  ota:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq git
+
+      - name: Process new OTA ZIPs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEVICE: lumia950
+          VERSION: 18.1
+          ROMTYPE: UNOFFICIAL
+          JSON_FILE: talkman.json
+        run: |
+          mkdir -p tmp_release
+          for ZIP in builds/*.zip; do
+            if [ ! -f "$ZIP" ]; then
+              echo "No new ZIPs found"
+              exit 0
+            fi
+
+            FILENAME=$(basename "$ZIP")
+            DATE_TAG=$(date +%Y%m%d)
+            RELEASE_NAME="OTA $DATE_TAG"
+
+            echo "📦 Creating GitHub Release for $FILENAME"
+            gh release create $DATE_TAG "$ZIP" -t "$RELEASE_NAME" -n "OTA build for $DEVICE" || \
+              gh release upload $DATE_TAG "$ZIP" --clobber
+
+            # Gather build info
+            DATETIME=$(date +%s)
+            ID=$(sha256sum "$ZIP" | cut -d ' ' -f1)
+            SIZE=$(stat -c%s "$ZIP")
+            URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$DATE_TAG/$FILENAME"
+
+            # Build JSON entry
+            ENTRY=$(jq -n \
+              --arg dt "$DATETIME" \
+              --arg fn "$FILENAME" \
+              --arg id "$ID" \
+              --arg romtype "$ROMTYPE" \
+              --arg size "$SIZE" \
+              --arg url "$URL" \
+              --arg version "$VERSION" \
+              '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version}')
+
+            # Update JSON
+            if [ -f "$JSON_FILE" ]; then
+              OLD=$(jq '.response' "$JSON_FILE")
+              jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp_release/$JSON_FILE
+            else
+              jq -n --argjson e "$ENTRY" '{response: [$e]}' > tmp_release/$JSON_FILE
+            fi
+
+            # Remove ZIP from repo folder
+            rm "$ZIP"
+          done
+
+      - name: Commit JSON update
+        run: |
+          mv tmp_release/$JSON_FILE .
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add $JSON_FILE
+          git commit -m "Update OTA JSON with new build(s) [skip ci]" || echo "No changes to commit"
+          git push
