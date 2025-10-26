@@ -19,24 +19,22 @@ jobs:
         run: |
           [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
 
-      - name: Fetch releases and update talkman.json
+      - name: Fetch releases and update JSON
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JSON_FILE: talkman.json
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
-          # Fetch releases
+          # Fetch releases JSON
           curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
 
-          # Merge safely into talkman.json
-          jq --arg version "$VERSION" --arg romtype "$ROMTYPE" '
-            # Read existing JSON
-            .response as $old_resp |
+          # Read old JSON safely
+          OLD_JSON=$(cat talkman.json)
 
-            # Read releases from releases.json
-            (input // []) |
+          # Build new entries safely
+          NEW_JSON=$(jq --arg version "$VERSION" --arg romtype "$ROMTYPE" '
+            # input: releases.json
             map((.assets // [])[] | select(.name | test("-talkman.zip$")) |
               {
                 datetime: (now|floor),
@@ -48,12 +46,15 @@ jobs:
                 version: $version,
                 changelog: ""
               }
-            ) as $new_entries |
+            )
+          ' releases.json)
 
-            # Skip duplicates by filename
-            $old_resp + ($new_entries | map(select(.filename as $f | ($old_resp[]? | .filename != $f)))) |
-            {response: .}
-          ' talkman.json releases.json > tmp.json && mv tmp.json talkman.json
+          # Merge old + new, skipping duplicates
+          echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '
+            .response = (.response // []) + ($new | map(select(.filename as $f | (.response[]? | .filename != $f))))
+          ' > tmp.json
+
+          mv tmp.json talkman.json
 
       - name: Commit updated talkman.json
         run: |
