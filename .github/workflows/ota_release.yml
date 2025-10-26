@@ -19,7 +19,7 @@ jobs:
         run: |
           [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
 
-      - name: Fetch releases and update JSON
+      - name: Fetch releases and update talkman.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: 18.1
@@ -29,24 +29,24 @@ jobs:
           curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
 
-          # Read old JSON safely
+          # Read old talkman.json
           OLD_JSON=$(cat talkman.json)
 
           # Build new entries safely
           NEW_JSON=$(jq --arg version "$VERSION" --arg romtype "$ROMTYPE" '
-            # input: releases.json
-            map((.assets // [])[] | select(.name | test("-talkman.zip$")) |
-              {
-                datetime: (now|floor),
-                filename: .name,
-                id: "",  # SHA256 placeholder
-                romtype: $romtype,
-                size: .size,
-                url: ("https://github.com/'"${GITHUB_REPOSITORY}"'/releases/download/" + .name + "/" + .name),
-                version: $version,
-                changelog: ""
-              }
-            )
+            # releases.json is input
+            .[] | {tag_name, assets} |
+            (.assets // [])[] | select(.name | test("-talkman.zip$")) |
+            {
+              datetime: (now|floor),
+              filename: .name,
+              id: "",  # SHA256 placeholder
+              romtype: $romtype,
+              size: .size,
+              url: ("https://github.com/'"${GITHUB_REPOSITORY}"'/releases/download/" + .tag_name + "/" + .name),
+              version: $version,
+              changelog: ""
+            }
           ' releases.json)
 
           # Merge old + new, skipping duplicates
