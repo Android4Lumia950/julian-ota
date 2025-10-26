@@ -28,7 +28,7 @@ jobs:
           JSON_FILE: talkman.json
         run: |
           mkdir -p tmp_release
-          for ZIP in builds/*.zip; do
+          for ZIP in builds/*-talkman.zip; do
             if [ ! -f "$ZIP" ]; then
               echo "No new ZIPs found"
               exit 0
@@ -48,6 +48,15 @@ jobs:
             SIZE=$(stat -c%s "$ZIP")
             URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$DATE_TAG/$FILENAME"
 
+            # Determine changelog file
+            BASE_NAME="${FILENAME%-talkman.zip}-talkman"
+            CHANGELOG_FILE="builds/$BASE_NAME.txt"
+            if [ -f "$CHANGELOG_FILE" ]; then
+                CHANGELOG=$(cat "$CHANGELOG_FILE" | tr -d '\n')
+            else
+                CHANGELOG=""
+            fi
+
             # Build JSON entry
             ENTRY=$(jq -n \
               --arg dt "$DATETIME" \
@@ -57,7 +66,8 @@ jobs:
               --arg size "$SIZE" \
               --arg url "$URL" \
               --arg version "$VERSION" \
-              '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version}')
+              --arg cl "$CHANGELOG" \
+              '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
 
             # Update JSON
             if [ -f "$JSON_FILE" ]; then
