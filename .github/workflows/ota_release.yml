@@ -19,7 +19,7 @@ jobs:
         run: |
           [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
 
-      - name: Fetch releases and update JSON
+      - name: Fetch GitHub Releases and update JSON
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JSON_FILE: talkman.json
@@ -31,7 +31,6 @@ jobs:
           RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
 
-          # Iterate by index to avoid subshell issues
           COUNT=$(echo "$RELEASES" | jq 'length')
           for i in $(seq 0 $((COUNT-1))); do
             TAG=$(echo "$RELEASES" | jq -r ".[$i].tag_name")
@@ -45,7 +44,7 @@ jobs:
 
                 # Skip if already exists
                 if jq -e --arg fn "$NAME" '.response[] | select(.filename==$fn)' "$JSON_FILE" > /dev/null; then
-                  echo "$NAME already in JSON, skipping"
+                  echo "$NAME already exists, skipping"
                   continue
                 fi
 
@@ -63,21 +62,18 @@ jobs:
                   CHANGELOG=""
                 fi
 
-                # Merge entry into JSON
-                ENTRY=$(jq -n \
-                  --arg dt "$DATETIME" \
-                  --arg fn "$NAME" \
-                  --arg id "$ID" \
-                  --arg romtype "$ROMTYPE" \
-                  --arg size "$SIZE" \
-                  --arg url "$URL" \
-                  --arg version "$VERSION" \
-                  --arg cl "$CHANGELOG" \
-                  '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
+                # Append entry safely to JSON
+                jq --arg dt "$DATETIME" \
+                   --arg fn "$NAME" \
+                   --arg id "$ID" \
+                   --arg romtype "$ROMTYPE" \
+                   --arg size "$SIZE" \
+                   --arg url "$URL" \
+                   --arg version "$VERSION" \
+                   --arg cl "$CHANGELOG" \
+                   '.response += [{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}]' \
+                   "$JSON_FILE" > tmp.json && mv tmp.json "$JSON_FILE"
 
-                OLD=$(jq '.response // []' "$JSON_FILE")
-                jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp.json
-                mv tmp.json "$JSON_FILE"
               fi
             done
           done
