@@ -13,9 +13,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq curl
+          sudo apt-get install -y jq curl git
 
-      - name: Fetch release assets and update JSON
+      - name: Fetch release assets and update talkman.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JSON_FILE: talkman.json
@@ -23,25 +23,30 @@ jobs:
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
-          # Fetch release assets using GitHub REST API
+          # Fetch releases using GitHub REST API
           RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
 
-          # Iterate over each release
+          # Iterate over releases
           echo "$RELEASES" | jq -c '.[]' | while read -r release; do
             TAG=$(echo "$release" | jq -r '.tag_name')
             ASSETS=$(echo "$release" | jq -c '.assets[]?')
 
             echo "$ASSETS" | while read -r asset; do
               NAME=$(echo "$asset" | jq -r '.name')
+
               # Only process -talkman.zip files
               if [[ "$NAME" == *"-talkman.zip" ]]; then
                 URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$NAME"
                 SIZE=$(echo "$asset" | jq -r '.size')
                 DATETIME=$(date +%s)
-                ID=$(curl -sL "$URL" | sha256sum | cut -d ' ' -f1)
 
-                # Optional: Check if changelog file exists in same release
+                # Download the ZIP temporarily to compute SHA256
+                curl -sL "$URL" -o tmp.zip
+                ID=$(sha256sum tmp.zip | cut -d ' ' -f1)
+                rm tmp.zip
+
+                # Optional: check if changelog exists in the release
                 CHANGELOG_NAME="${NAME%-talkman.zip}-talkman.txt"
                 CHANGELOG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$CHANGELOG_NAME"
                 if curl --head --silent --fail "$CHANGELOG_URL" > /dev/null; then
@@ -62,13 +67,13 @@ jobs:
                   --arg cl "$CHANGELOG" \
                   '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
 
-                # Update talkman.json
+                # Safely update talkman.json
                 if [ -f "$JSON_FILE" ]; then
-                  OLD=$(jq '.response' "$JSON_FILE")
+                  OLD=$(jq '.response // []' "$JSON_FILE")
                   jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp_$JSON_FILE
-                  mv tmp_$JSON_FILE $JSON_FILE
+                  mv tmp_$JSON_FILE "$JSON_FILE"
                 else
-                  jq -n --argjson e "$ENTRY" '{response: [$e]}' > $JSON_FILE
+                  jq -n --argjson e "$ENTRY" '{response: [$e]}' > "$JSON_FILE"
                 fi
               fi
             done
