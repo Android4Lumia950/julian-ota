@@ -29,38 +29,48 @@ jobs:
           curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
 
-          # Read old talkman.json
           OLD_JSON=$(cat talkman.json)
+          NEW_JSON="[]"
 
-          # Build new entries, attaching release tag to each asset
-          NEW_JSON=$(jq --arg version "$VERSION" --arg romtype "$ROMTYPE" '
-            .[] |
-            .assets = (.assets // []) |
-            .assets[]? |
-            . + {tag_name: (.tag_name // .tag_name // "")} |
-            select(.name | test("-talkman.zip$")) |
-            {
-              datetime: (now|floor),
-              filename: .name,
-              id: "",
-              romtype: $romtype,
-              size: .size,
-              url: ("https://github.com/'"${GITHUB_REPOSITORY}"'/releases/download/" + .tag_name + "/" + .name),
-              version: $version,
-              changelog: ""
-            }
-          ' releases.json)
+          # Loop over each release in Bash
+          RELEASE_COUNT=$(jq length releases.json)
+          for i in $(seq 0 $((RELEASE_COUNT-1))); do
+            TAG=$(jq -r ".[$i].tag_name" releases.json)
+            ASSETS=$(jq -c ".[$i].assets // []" releases.json)
+            ASSET_COUNT=$(echo "$ASSETS" | jq length)
 
-          # Merge old + new, skipping duplicates, works if talkman.json is empty
-          echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '
-            if (.response | length) == 0 then
-              .response = $new
-            else
-              .response = (.response // []) + ($new | map(select(.filename as $f | (.response[]? | .filename != $f))))
-            end
-          ' > tmp.json
+            for j in $(seq 0 $((ASSET_COUNT-1))); do
+              NAME=$(echo "$ASSETS" | jq -r ".[$j].name")
+              SIZE=$(echo "$ASSETS" | jq -r ".[$j].size")
 
-          mv tmp.json talkman.json
+              if [[ "$NAME" == *"-talkman.zip" ]]; then
+                URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$NAME"
+                DATETIME=$(date +%s)
+                ID=""  # SHA256 placeholder
+                CHANGELOG=""  # optional
+
+                ENTRY=$(jq -n \
+                  --arg dt "$DATETIME" \
+                  --arg fn "$NAME" \
+                  --arg id "$ID" \
+                  --arg romtype "$ROMTYPE" \
+                  --arg size "$SIZE" \
+                  --arg url "$URL" \
+                  --arg version "$VERSION" \
+                  --arg cl "$CHANGELOG" \
+                  '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
+
+                NEW_JSON=$(echo "$NEW_JSON" | jq ". + [$ENTRY]")
+              fi
+            done
+          done
+
+          # Merge old + new, skipping duplicates by filename
+          UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '
+            .response = (.response // []) + ($new | map(select(.filename as $f | (.response[]? | .filename != $f))))
+          ')
+
+          echo "$UPDATED_JSON" > talkman.json
 
       - name: Commit updated talkman.json
         run: |
