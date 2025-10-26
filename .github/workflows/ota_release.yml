@@ -25,14 +25,13 @@ jobs:
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
+          OLD_JSON=$(cat talkman.json)
+          NEW_ENTRIES=()
+
           # Fetch releases JSON
           curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
 
-          OLD_JSON=$(cat talkman.json)
-          NEW_JSON="[]"
-
-          # Loop over releases
           RELEASE_COUNT=$(jq length releases.json)
           for i in $(seq 0 $((RELEASE_COUNT-1))); do
             TAG=$(jq -r ".[$i].tag_name" releases.json)
@@ -49,29 +48,29 @@ jobs:
                 ID=""  # SHA256 placeholder
                 CHANGELOG=""  # optional
 
-                ENTRY=$(jq -n \
-                  --arg dt "$DATETIME" \
-                  --arg fn "$NAME" \
-                  --arg id "$ID" \
-                  --arg romtype "$ROMTYPE" \
-                  --arg size "$SIZE" \
-                  --arg url "$URL" \
-                  --arg version "$VERSION" \
-                  --arg cl "$CHANGELOG" \
-                  '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
-
-                # Only add if filename doesn't exist in old JSON
+                # Skip if filename already exists in old JSON
                 EXISTS=$(echo "$OLD_JSON" | jq --arg fn "$NAME" '.response[]? | select(.filename == $fn)')
-                if [ -z "$EXISTS" ]; then
-                    NEW_JSON=$(echo "$NEW_JSON" | jq ". + [$ENTRY]")
+                if [ -n "$EXISTS" ]; then
+                  continue
                 fi
+
+                # Build JSON entry as a string
+                ENTRY="{\"datetime\":$DATETIME,\"filename\":\"$NAME\",\"id\":\"$ID\",\"romtype\":\"$ROMTYPE\",\"size\":$SIZE,\"url\":\"$URL\",\"version\":\"$VERSION\",\"changelog\":\"$CHANGELOG\"}"
+
+                NEW_ENTRIES+=("$ENTRY")
               fi
             done
           done
 
-          # Merge old + new
-          UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '.response = (.response // []) + $new')
-          echo "$UPDATED_JSON" > talkman.json
+          # Merge new entries with old JSON
+          if [ ${#NEW_ENTRIES[@]} -gt 0 ]; then
+            NEW_JSON_ARRAY=$(printf ",%s" "${NEW_ENTRIES[@]}")
+            NEW_JSON_ARRAY="[${NEW_JSON_ARRAY:1}]"
+            UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_JSON_ARRAY" '.response = (.response // []) + $new')
+            echo "$UPDATED_JSON" > talkman.json
+          else
+            echo "No new entries to add."
+          fi
 
       - name: Commit updated talkman.json
         run: |
