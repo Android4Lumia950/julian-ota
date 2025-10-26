@@ -34,8 +34,7 @@ jobs:
 
           # Build new entries safely, preserving tag_name for URLs
           NEW_JSON=$(jq --arg version "$VERSION" --arg romtype "$ROMTYPE" '
-            map(.assets = (.assets // []) | .assets |= map(. + {tag_name: (.tag_name // "")})) |
-            .[] | (.assets // [])[] | select(.name | test("-talkman.zip$")) |
+            .[] | .assets = (.assets // []) | .assets[]? | select(.name | test("-talkman.zip$")) |
             {
               datetime: (now|floor),
               filename: .name,
@@ -48,9 +47,13 @@ jobs:
             }
           ' releases.json)
 
-          # Merge old + new, skipping duplicates by filename
+          # Merge old + new, skipping duplicates safely
           echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '
-            .response = (.response // []) + ($new | map(select(.filename as $f | (.response[]? | .filename != $f))))
+            if (.response | length) == 0 then
+              .response = $new
+            else
+              .response = (.response // []) + ($new | map(select(.filename as $f | (.response[]? | .filename != $f))))
+            end
           ' > tmp.json
 
           mv tmp.json talkman.json
