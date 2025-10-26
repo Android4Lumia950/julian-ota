@@ -32,22 +32,26 @@ jobs:
           # Read old talkman.json
           OLD_JSON=$(cat talkman.json)
 
-          # Build new entries safely, preserving tag_name for URLs
+          # Build new entries, attaching release tag to each asset
           NEW_JSON=$(jq --arg version "$VERSION" --arg romtype "$ROMTYPE" '
-            .[] | .assets = (.assets // []) | .assets[]? | select(.name | test("-talkman.zip$")) |
+            .[] |
+            .assets = (.assets // []) |
+            .assets[]? |
+            . + {tag_name: (.tag_name // .tag_name // "")} |
+            select(.name | test("-talkman.zip$")) |
             {
               datetime: (now|floor),
               filename: .name,
-              id: "",  # SHA256 placeholder
+              id: "",
               romtype: $romtype,
               size: .size,
-              url: ("https://github.com/'"${GITHUB_REPOSITORY}"'/releases/download/" + (.tag_name // "unknown") + "/" + .name),
+              url: ("https://github.com/'"${GITHUB_REPOSITORY}"'/releases/download/" + .tag_name + "/" + .name),
               version: $version,
               changelog: ""
             }
           ' releases.json)
 
-          # Merge old + new, skipping duplicates safely
+          # Merge old + new, skipping duplicates, works if talkman.json is empty
           echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '
             if (.response | length) == 0 then
               .response = $new
