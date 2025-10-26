@@ -19,21 +19,23 @@ jobs:
         run: |
           [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
 
-      - name: Fetch releases and update talkman.json
+      - name: Fetch GitHub releases and update JSON
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JSON_FILE: talkman.json
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
-          # Fetch GitHub releases
+          # Fetch releases JSON
           curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
 
-          # Merge new entries safely into talkman.json
+          # Merge releases safely into talkman.json
           jq -s --arg version "$VERSION" --arg romtype "$ROMTYPE" '
             .[0] as $old |
-            .[1] | map((.assets // [])[] | select(.name | test("-talkman.zip$")) |
+            # Ensure releases array exists
+            .[1] // [] | 
+            map((.assets // [])[] | select(.name | test("-talkman.zip$")) |
               {
                 datetime: (now|floor),
                 filename: .name,
