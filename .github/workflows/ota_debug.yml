@@ -1,0 +1,107 @@
+name: OTA JSON Debug Updater
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl git
+
+      - name: Ensure talkman.json exists
+        run: |
+          [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
+
+      - name: Debug fetch releases and update talkman.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: 18.1
+          ROMTYPE: UNOFFICIAL
+        run: |
+          OLD_JSON=$(cat talkman.json)
+          NEW_JSON="[]"
+
+          echo "Old talkman.json:"
+          cat talkman.json
+          echo "----------------------"
+
+          # Fetch releases JSON
+          curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
+
+          echo "Fetched releases JSON:"
+          cat releases.json | jq '.'  # pretty-print
+          echo "----------------------"
+
+          RELEASE_COUNT=$(jq length releases.json)
+          echo "Number of releases: $RELEASE_COUNT"
+
+          for i in $(seq 0 $((RELEASE_COUNT-1))); do
+            TAG=$(jq -r ".[$i].tag_name" releases.json)
+            echo "Processing release: $TAG"
+
+            ASSETS=$(jq -c ".[$i].assets // []" releases.json)
+            ASSET_COUNT=$(echo "$ASSETS" | jq length)
+            echo "Number of assets: $ASSET_COUNT"
+
+            for j in $(seq 0 $((ASSET_COUNT-1))); do
+              NAME=$(echo "$ASSETS" | jq -r ".[$j].name")
+              SIZE=$(echo "$ASSETS" | jq -r ".[$j].size")
+              echo "Found asset: $NAME ($SIZE bytes)"
+
+              if [[ "$NAME" == *"-talkman.zip" ]]; then
+                echo "Matched -talkman.zip: $NAME"
+                URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$NAME"
+                DATETIME=$(date +%s)
+                ID=""
+                CHANGELOG=""
+
+                EXISTS=$(echo "$OLD_JSON" | jq --arg fn "$NAME" '.response[]? | select(.filename == $fn)')
+                if [ -n "$EXISTS" ]; then
+                  echo "Asset already exists in talkman.json, skipping."
+                  continue
+                fi
+
+                ENTRY=$(jq -n \
+                  --arg dt "$DATETIME" \
+                  --arg fn "$NAME" \
+                  --arg id "$ID" \
+                  --arg romtype "$ROMTYPE" \
+                  --arg size "$SIZE" \
+                  --arg url "$URL" \
+                  --arg version "$VERSION" \
+                  --arg cl "$CHANGELOG" \
+                  '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
+
+                NEW_JSON=$(echo "$NEW_JSON" | jq ". + [$ENTRY]")
+                echo "Added to NEW_JSON: $NAME"
+              fi
+            done
+          done
+
+          echo "Final NEW_JSON:"
+          echo "$NEW_JSON" | jq '.'
+
+          # Merge if there are new entries
+          if [ "$NEW_JSON" != "[]" ]; then
+            UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '.response = (.response // []) + $new')
+            echo "$UPDATED_JSON" > talkman.json
+            echo "talkman.json updated successfully."
+          else
+            echo "No new entries to add to talkman.json."
+          fi
+
+      - name: Commit updated talkman.json
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add talkman.json
+          git commit -m "Update talkman.json from GitHub Release(s) [skip ci]" || echo "No changes to commit"
+          git push
