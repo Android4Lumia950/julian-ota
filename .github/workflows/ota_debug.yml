@@ -17,9 +17,7 @@ jobs:
 
       - name: Ensure talkman.json exists
         run: |
-          if [ ! -f talkman.json ]; then
-            echo '{"response":[]}' > talkman.json
-          fi
+          [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
 
       - name: Fetch releases and update talkman.json
         env:
@@ -27,8 +25,6 @@ jobs:
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
-          set -e
-
           OLD_JSON=$(cat talkman.json)
           NEW_ENTRIES="[]"
 
@@ -36,6 +32,7 @@ jobs:
           cat talkman.json
           echo "----------------------"
 
+          # Fetch releases JSON
           curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
 
@@ -84,8 +81,10 @@ jobs:
             done
           done
 
+          # Merge new entries into old JSON
           if [ "$NEW_ENTRIES" != "[]" ]; then
             UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_ENTRIES" '.response = (.response // []) + $new')
+            # Normalize JSON to prevent invisible whitespace issues
             echo "$UPDATED_JSON" | jq -S . > talkman.json
             echo "talkman.json updated successfully:"
             cat talkman.json
@@ -106,3 +105,4 @@ jobs:
             git push
           else
             echo "No changes detected, skipping commit."
+          fi
