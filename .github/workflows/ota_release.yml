@@ -19,7 +19,7 @@ jobs:
         run: |
           [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
 
-      - name: Fetch GitHub Releases and update JSON
+      - name: Fetch releases and update JSON
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JSON_FILE: talkman.json
@@ -27,29 +27,29 @@ jobs:
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
-          # Fetch all releases
+          # Fetch releases
           RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
 
-          # Iterate over releases and assets
-          echo "$RELEASES" | jq -c '.[]' | while read -r release; do
-            TAG=$(echo "$release" | jq -r '.tag_name')
-            echo "$release" | jq -c '.assets[]?' | while read -r asset; do
-              NAME=$(echo "$asset" | jq -r '.name')
-
-              # Only process -talkman.zip
+          # Iterate by index to avoid subshell issues
+          COUNT=$(echo "$RELEASES" | jq 'length')
+          for i in $(seq 0 $((COUNT-1))); do
+            TAG=$(echo "$RELEASES" | jq -r ".[$i].tag_name")
+            ASSETS_COUNT=$(echo "$RELEASES" | jq ".[$i].assets | length")
+            for j in $(seq 0 $((ASSETS_COUNT-1))); do
+              NAME=$(echo "$RELEASES" | jq -r ".[$i].assets[$j].name")
               if [[ "$NAME" == *"-talkman.zip" ]]; then
                 URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$NAME"
-                SIZE=$(echo "$asset" | jq -r '.size')
+                SIZE=$(echo "$RELEASES" | jq -r ".[$i].assets[$j].size")
                 DATETIME=$(date +%s)
 
-                # Skip if already exists in JSON
+                # Skip if already exists
                 if jq -e --arg fn "$NAME" '.response[] | select(.filename==$fn)' "$JSON_FILE" > /dev/null; then
-                  echo "$NAME already exists in JSON, skipping."
+                  echo "$NAME already in JSON, skipping"
                   continue
                 fi
 
-                # Download ZIP to compute SHA256
+                # Compute SHA256
                 curl -sL "$URL" -o tmp.zip
                 ID=$(sha256sum tmp.zip | cut -d ' ' -f1)
                 rm tmp.zip
@@ -63,7 +63,7 @@ jobs:
                   CHANGELOG=""
                 fi
 
-                # Build new JSON entry
+                # Merge entry into JSON
                 ENTRY=$(jq -n \
                   --arg dt "$DATETIME" \
                   --arg fn "$NAME" \
@@ -75,7 +75,6 @@ jobs:
                   --arg cl "$CHANGELOG" \
                   '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
 
-                # Merge entry into talkman.json
                 OLD=$(jq '.response // []' "$JSON_FILE")
                 jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp.json
                 mv tmp.json "$JSON_FILE"
