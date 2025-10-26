@@ -9,6 +9,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          persist-credentials: true  # Needed to push changes
 
       - name: Install dependencies
         run: |
@@ -98,10 +100,11 @@ jobs:
             echo "No new entries to add to talkman.json."
           fi
 
-      - name: Commit updated talkman.json
+      - name: Commit and push updated talkman.json
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git add talkman.json
-          git commit -m "Update talkman.json from GitHub Release(s) [skip ci]" || echo "No changes to commit"
+          # Only commit if there are changes
+          git diff --cached --quiet || git commit -m "Update talkman.json from GitHub Release(s) [skip ci]"
           git push
