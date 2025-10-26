@@ -9,8 +9,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          persist-credentials: true
 
       - name: Install dependencies
         run: |
@@ -27,8 +25,9 @@ jobs:
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
+          # Backup old JSON
           OLD_JSON=$(cat talkman.json)
-          NEW_JSON="[]"
+          NEW_ENTRIES="[]"
 
           echo "Old talkman.json:"
           cat talkman.json
@@ -37,10 +36,6 @@ jobs:
           # Fetch releases JSON
           curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
-
-          echo "Fetched releases JSON:"
-          cat releases.json | jq '.'
-          echo "----------------------"
 
           RELEASE_COUNT=$(jq length releases.json)
           echo "Number of releases: $RELEASE_COUNT"
@@ -59,7 +54,6 @@ jobs:
               echo "Found asset: $NAME ($SIZE bytes)"
 
               if [[ "$NAME" == *"-talkman.zip" ]]; then
-                echo "Matched -talkman.zip: $NAME"
                 URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$NAME"
                 DATETIME=$(date +%s)
                 ID=""
@@ -67,7 +61,7 @@ jobs:
 
                 EXISTS=$(echo "$OLD_JSON" | jq --arg fn "$NAME" '.response[]? | select(.filename == $fn)')
                 if [ -n "$EXISTS" ]; then
-                  echo "Asset already exists in talkman.json, skipping."
+                  echo "Asset already exists, skipping."
                   continue
                 fi
 
@@ -82,39 +76,33 @@ jobs:
                   --arg cl "$CHANGELOG" \
                   '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
 
-                NEW_JSON=$(echo "$NEW_JSON" | jq ". + [$ENTRY]")
-                echo "Added to NEW_JSON: $NAME"
+                NEW_ENTRIES=$(echo "$NEW_ENTRIES" | jq ". + [$ENTRY]")
+                echo "Added entry for $NAME"
               fi
             done
           done
 
-          echo "Final NEW_JSON:"
-          echo "$NEW_JSON" | jq '.'
-
-          # Merge if there are new entries
-          if [ "$NEW_JSON" != "[]" ]; then
-            UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '.response = (.response // []) + $new')
+          # Merge new entries into old JSON
+          if [ "$NEW_ENTRIES" != "[]" ]; then
+            UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_ENTRIES" '.response = (.response // []) + $new')
+            # Normalize JSON to prevent invisible whitespace issues
             echo "$UPDATED_JSON" | jq -S . > talkman.json
-            echo "talkman.json updated successfully."
+            echo "talkman.json updated successfully:"
+            cat talkman.json
           else
-            echo "No new entries to add to talkman.json."
+            echo "No new entries to add."
           fi
 
-      - name: Commit and push updated talkman.json
+      - name: Commit and push talkman.json
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
 
-          # Normalize JSON formatting
-          jq -S . talkman.json > talkman.normalized.json
-          mv talkman.normalized.json talkman.json
-
           git add talkman.json
 
-          # Only commit if changes exist
-          if ! git diff --cached --quiet; then
+          # Only commit if JSON content changed
+          if ! git diff --exit-code --quiet; then
             git commit -m "Update talkman.json from GitHub Release(s) [skip ci]"
             git push
           else
             echo "No changes detected, skipping commit."
-          fi
