@@ -27,12 +27,14 @@ jobs:
           RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
 
+          # Fetch existing talkman.json (use raw URL)
+          RAW_JSON_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/talkman.json"
+          curl -sL "$RAW_JSON_URL" -o "$JSON_FILE" || echo '{}' > "$JSON_FILE"
+
           # Iterate over releases
           echo "$RELEASES" | jq -c '.[]' | while read -r release; do
             TAG=$(echo "$release" | jq -r '.tag_name')
-            ASSETS=$(echo "$release" | jq -c '.assets[]?')
-
-            echo "$ASSETS" | while read -r asset; do
+            echo "$release" | jq -c '.assets[]?' | while read -r asset; do
               NAME=$(echo "$asset" | jq -r '.name')
 
               # Only process -talkman.zip files
@@ -41,12 +43,12 @@ jobs:
                 SIZE=$(echo "$asset" | jq -r '.size')
                 DATETIME=$(date +%s)
 
-                # Download the ZIP temporarily to compute SHA256
+                # Download ZIP temporarily to compute SHA256
                 curl -sL "$URL" -o tmp.zip
                 ID=$(sha256sum tmp.zip | cut -d ' ' -f1)
                 rm tmp.zip
 
-                # Optional: check if changelog exists in the release
+                # Optional changelog
                 CHANGELOG_NAME="${NAME%-talkman.zip}-talkman.txt"
                 CHANGELOG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$CHANGELOG_NAME"
                 if curl --head --silent --fail "$CHANGELOG_URL" > /dev/null; then
@@ -55,7 +57,7 @@ jobs:
                   CHANGELOG=""
                 fi
 
-                # Build JSON entry
+                # Build JSON entry safely
                 ENTRY=$(jq -n \
                   --arg dt "$DATETIME" \
                   --arg fn "$NAME" \
@@ -67,14 +69,10 @@ jobs:
                   --arg cl "$CHANGELOG" \
                   '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
 
-                # Safely update talkman.json
-                if [ -f "$JSON_FILE" ]; then
-                  OLD=$(jq '.response // []' "$JSON_FILE")
-                  jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp_$JSON_FILE
-                  mv tmp_$JSON_FILE "$JSON_FILE"
-                else
-                  jq -n --argjson e "$ENTRY" '{response: [$e]}' > "$JSON_FILE"
-                fi
+                # Merge with existing JSON safely
+                OLD=$(jq '.response // []' "$JSON_FILE")
+                jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp_$JSON_FILE
+                mv tmp_$JSON_FILE "$JSON_FILE"
               fi
             done
           done
@@ -84,5 +82,5 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git add talkman.json
-          git commit -m "Update talkman.json from new GitHub Release(s) [skip ci]" || echo "No changes to commit"
+          git commit -m "Update talkman.json from GitHub Release(s) [skip ci]" || echo "No changes to commit"
           git push
