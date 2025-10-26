@@ -15,7 +15,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl git
 
-      - name: Fetch release assets and update talkman.json
+      - name: Ensure talkman.json exists
+        run: |
+          [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
+
+      - name: Fetch GitHub Releases and update JSON
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JSON_FILE: talkman.json
@@ -23,11 +27,7 @@ jobs:
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
-          # Fetch existing JSON safely
-          RAW_JSON_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/talkman.json"
-          curl -sL "$RAW_JSON_URL" -o "$JSON_FILE" || echo '{"response":[]}' > "$JSON_FILE"
-
-          # Fetch releases using GitHub REST API
+          # Fetch all releases
           RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
 
@@ -37,13 +37,19 @@ jobs:
             echo "$release" | jq -c '.assets[]?' | while read -r asset; do
               NAME=$(echo "$asset" | jq -r '.name')
 
-              # Only process -talkman.zip files
+              # Only process -talkman.zip
               if [[ "$NAME" == *"-talkman.zip" ]]; then
                 URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$NAME"
                 SIZE=$(echo "$asset" | jq -r '.size')
                 DATETIME=$(date +%s)
 
-                # Compute SHA256 safely
+                # Skip if already exists in JSON
+                if jq -e --arg fn "$NAME" '.response[] | select(.filename==$fn)' "$JSON_FILE" > /dev/null; then
+                  echo "$NAME already exists in JSON, skipping."
+                  continue
+                fi
+
+                # Download ZIP to compute SHA256
                 curl -sL "$URL" -o tmp.zip
                 ID=$(sha256sum tmp.zip | cut -d ' ' -f1)
                 rm tmp.zip
@@ -57,22 +63,27 @@ jobs:
                   CHANGELOG=""
                 fi
 
-                # Append new entry directly to JSON file using jq
-                jq --arg dt "$DATETIME" \
-                   --arg fn "$NAME" \
-                   --arg id "$ID" \
-                   --arg romtype "$ROMTYPE" \
-                   --arg size "$SIZE" \
-                   --arg url "$URL" \
-                   --arg version "$VERSION" \
-                   --arg cl "$CHANGELOG" \
-                   '.response |= [{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}] + .' \
-                   "$JSON_FILE" > tmp.json && mv tmp.json "$JSON_FILE"
+                # Build new JSON entry
+                ENTRY=$(jq -n \
+                  --arg dt "$DATETIME" \
+                  --arg fn "$NAME" \
+                  --arg id "$ID" \
+                  --arg romtype "$ROMTYPE" \
+                  --arg size "$SIZE" \
+                  --arg url "$URL" \
+                  --arg version "$VERSION" \
+                  --arg cl "$CHANGELOG" \
+                  '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
+
+                # Merge entry into talkman.json
+                OLD=$(jq '.response // []' "$JSON_FILE")
+                jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp.json
+                mv tmp.json "$JSON_FILE"
               fi
             done
           done
 
-      - name: Commit JSON update
+      - name: Commit updated talkman.json
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
