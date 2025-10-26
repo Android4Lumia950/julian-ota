@@ -32,7 +32,7 @@ jobs:
           OLD_JSON=$(cat talkman.json)
           NEW_JSON="[]"
 
-          # Loop over each release in Bash
+          # Loop over releases
           RELEASE_COUNT=$(jq length releases.json)
           for i in $(seq 0 $((RELEASE_COUNT-1))); do
             TAG=$(jq -r ".[$i].tag_name" releases.json)
@@ -60,16 +60,17 @@ jobs:
                   --arg cl "$CHANGELOG" \
                   '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
 
-                NEW_JSON=$(echo "$NEW_JSON" | jq ". + [$ENTRY]")
+                # Only add if filename doesn't exist in old JSON
+                EXISTS=$(echo "$OLD_JSON" | jq --arg fn "$NAME" '.response[]? | select(.filename == $fn)')
+                if [ -z "$EXISTS" ]; then
+                    NEW_JSON=$(echo "$NEW_JSON" | jq ". + [$ENTRY]")
+                fi
               fi
             done
           done
 
-          # Merge old + new, skipping duplicates by filename
-          UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '
-            .response = (.response // []) + ($new | map(select(.filename as $f | (.response[]? | .filename != $f))))
-          ')
-
+          # Merge old + new
+          UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '.response = (.response // []) + $new')
           echo "$UPDATED_JSON" > talkman.json
 
       - name: Commit updated talkman.json
