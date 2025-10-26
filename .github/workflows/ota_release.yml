@@ -23,15 +23,15 @@ jobs:
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
+          # Fetch existing JSON safely
+          RAW_JSON_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/talkman.json"
+          curl -sL "$RAW_JSON_URL" -o "$JSON_FILE" || echo '{"response":[]}' > "$JSON_FILE"
+
           # Fetch releases using GitHub REST API
           RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
 
-          # Fetch existing talkman.json (use raw URL)
-          RAW_JSON_URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/talkman.json"
-          curl -sL "$RAW_JSON_URL" -o "$JSON_FILE" || echo '{}' > "$JSON_FILE"
-
-          # Iterate over releases
+          # Iterate over releases and assets
           echo "$RELEASES" | jq -c '.[]' | while read -r release; do
             TAG=$(echo "$release" | jq -r '.tag_name')
             echo "$release" | jq -c '.assets[]?' | while read -r asset; do
@@ -43,7 +43,7 @@ jobs:
                 SIZE=$(echo "$asset" | jq -r '.size')
                 DATETIME=$(date +%s)
 
-                # Download ZIP temporarily to compute SHA256
+                # Compute SHA256 safely
                 curl -sL "$URL" -o tmp.zip
                 ID=$(sha256sum tmp.zip | cut -d ' ' -f1)
                 rm tmp.zip
@@ -57,22 +57,17 @@ jobs:
                   CHANGELOG=""
                 fi
 
-                # Build JSON entry safely
-                ENTRY=$(jq -n \
-                  --arg dt "$DATETIME" \
-                  --arg fn "$NAME" \
-                  --arg id "$ID" \
-                  --arg romtype "$ROMTYPE" \
-                  --arg size "$SIZE" \
-                  --arg url "$URL" \
-                  --arg version "$VERSION" \
-                  --arg cl "$CHANGELOG" \
-                  '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
-
-                # Merge with existing JSON safely
-                OLD=$(jq '.response // []' "$JSON_FILE")
-                jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp_$JSON_FILE
-                mv tmp_$JSON_FILE "$JSON_FILE"
+                # Append new entry directly to JSON file using jq
+                jq --arg dt "$DATETIME" \
+                   --arg fn "$NAME" \
+                   --arg id "$ID" \
+                   --arg romtype "$ROMTYPE" \
+                   --arg size "$SIZE" \
+                   --arg url "$URL" \
+                   --arg version "$VERSION" \
+                   --arg cl "$CHANGELOG" \
+                   '.response |= [{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}] + .' \
+                   "$JSON_FILE" > tmp.json && mv tmp.json "$JSON_FILE"
               fi
             done
           done
