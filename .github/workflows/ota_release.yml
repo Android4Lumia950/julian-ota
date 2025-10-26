@@ -1,7 +1,7 @@
 name: OTA JSON Updater
 
 on:
-  workflow_dispatch:  # manually trigger, or schedule if you want
+  workflow_dispatch:
 
 jobs:
   update-json:
@@ -15,7 +15,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl
 
-      - name: Fetch latest Release assets
+      - name: Fetch release assets and update JSON
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JSON_FILE: talkman.json
@@ -23,24 +23,25 @@ jobs:
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
-          # Get the list of releases
-          RELEASES=$(gh release list --limit 20 --json tagName,publishedAt,assets)
+          # Fetch release assets using GitHub REST API
+          RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
 
-          # Iterate releases
+          # Iterate over each release
           echo "$RELEASES" | jq -c '.[]' | while read -r release; do
-            TAG=$(echo "$release" | jq -r '.tagName')
+            TAG=$(echo "$release" | jq -r '.tag_name')
             ASSETS=$(echo "$release" | jq -c '.assets[]?')
-            
+
             echo "$ASSETS" | while read -r asset; do
               NAME=$(echo "$asset" | jq -r '.name')
-              # only process -talkman.zip files
+              # Only process -talkman.zip files
               if [[ "$NAME" == *"-talkman.zip" ]]; then
                 URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$NAME"
                 SIZE=$(echo "$asset" | jq -r '.size')
                 DATETIME=$(date +%s)
                 ID=$(curl -sL "$URL" | sha256sum | cut -d ' ' -f1)
 
-                # Optional: check if changelog file exists in same release
+                # Optional: Check if changelog file exists in same release
                 CHANGELOG_NAME="${NAME%-talkman.zip}-talkman.txt"
                 CHANGELOG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$CHANGELOG_NAME"
                 if curl --head --silent --fail "$CHANGELOG_URL" > /dev/null; then
@@ -61,7 +62,7 @@ jobs:
                   --arg cl "$CHANGELOG" \
                   '{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}')
 
-                # Append to existing JSON or create new
+                # Update talkman.json
                 if [ -f "$JSON_FILE" ]; then
                   OLD=$(jq '.response' "$JSON_FILE")
                   jq -n --argjson e "$ENTRY" --argjson old "$OLD" '{response: [$e] + $old}' > tmp_$JSON_FILE
@@ -69,7 +70,6 @@ jobs:
                 else
                   jq -n --argjson e "$ENTRY" '{response: [$e]}' > $JSON_FILE
                 fi
-
               fi
             done
           done
