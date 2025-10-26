@@ -32,7 +32,7 @@ jobs:
           cat talkman.json
           echo "----------------------"
 
-          # Fetch releases JSON
+          # Fetch releases
           curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
 
@@ -84,13 +84,18 @@ jobs:
           # Merge new entries into old JSON
           if [ "$NEW_ENTRIES" != "[]" ]; then
             UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_ENTRIES" '.response = (.response // []) + $new')
-            # Normalize JSON to prevent invisible whitespace issues
-            echo "$UPDATED_JSON" | jq -S . > talkman.json
+            # Normalize JSON deterministically
+            echo "$UPDATED_JSON" | jq -S -c . > talkman.json
             echo "talkman.json updated successfully:"
             cat talkman.json
           else
             echo "No new entries to add."
           fi
+
+      - name: Debug Git status before commit
+        run: |
+          git status
+          git diff talkman.json || echo "No differences detected by git diff"
 
       - name: Commit and push talkman.json
         run: |
@@ -105,4 +110,3 @@ jobs:
             git push
           else
             echo "No changes detected, skipping commit."
-          fi
