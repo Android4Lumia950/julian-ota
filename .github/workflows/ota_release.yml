@@ -19,11 +19,10 @@ jobs:
         run: |
           [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
 
-      - name: Fetch GitHub Releases and update JSON
+      - name: Update talkman.json from releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JSON_FILE: talkman.json
-          DEVICE: lumia950
           VERSION: 18.1
           ROMTYPE: UNOFFICIAL
         run: |
@@ -31,52 +30,28 @@ jobs:
           RELEASES=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases")
 
-          COUNT=$(echo "$RELEASES" | jq 'length')
-          for i in $(seq 0 $((COUNT-1))); do
-            TAG=$(echo "$RELEASES" | jq -r ".[$i].tag_name")
-            ASSETS_COUNT=$(echo "$RELEASES" | jq ".[$i].assets | length")
-            for j in $(seq 0 $((ASSETS_COUNT-1))); do
-              NAME=$(echo "$RELEASES" | jq -r ".[$i].assets[$j].name")
-              if [[ "$NAME" == *"-talkman.zip" ]]; then
-                URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$NAME"
-                SIZE=$(echo "$RELEASES" | jq -r ".[$i].assets[$j].size")
-                DATETIME=$(date +%s)
-
-                # Skip if already exists
-                if jq -e --arg fn "$NAME" '.response[] | select(.filename==$fn)' "$JSON_FILE" > /dev/null; then
-                  echo "$NAME already exists, skipping"
-                  continue
-                fi
-
-                # Compute SHA256
-                curl -sL "$URL" -o tmp.zip
-                ID=$(sha256sum tmp.zip | cut -d ' ' -f1)
-                rm tmp.zip
-
-                # Optional changelog
-                CHANGELOG_NAME="${NAME%-talkman.zip}-talkman.txt"
-                CHANGELOG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/$CHANGELOG_NAME"
-                if curl --head --silent --fail "$CHANGELOG_URL" > /dev/null; then
-                  CHANGELOG=$(curl -sL "$CHANGELOG_URL" | tr -d '\n')
-                else
-                  CHANGELOG=""
-                fi
-
-                # Append entry safely to JSON
-                jq --arg dt "$DATETIME" \
-                   --arg fn "$NAME" \
-                   --arg id "$ID" \
-                   --arg romtype "$ROMTYPE" \
-                   --arg size "$SIZE" \
-                   --arg url "$URL" \
-                   --arg version "$VERSION" \
-                   --arg cl "$CHANGELOG" \
-                   '.response += [{datetime: ($dt|tonumber), filename: $fn, id: $id, romtype: $romtype, size: ($size|tonumber), url: $url, version: $version, changelog: $cl}]' \
-                   "$JSON_FILE" > tmp.json && mv tmp.json "$JSON_FILE"
-
-              fi
-            done
-          done
+          # Build new JSON entries in one jq pass
+          jq --arg version "$VERSION" \
+             --arg romtype "$ROMTYPE" \
+             --argjson now "$(date +%s)" \
+             --slurpfile existing "$JSON_FILE" '
+             # Start with existing response
+             .response = ($existing[0].response // []) +
+             (
+               $RELEASES | 
+               map(.assets[]? | select(.name | test("-talkman.zip$")) |
+                 {
+                   datetime: ($now | tonumber),
+                   filename: .name,
+                   id: "",          # Placeholder, can compute SHA256 separately
+                   romtype: $romtype,
+                   size: .size,
+                   url: ("https://github.com/'"${GITHUB_REPOSITORY}"'/releases/download/" + .name + "/" + .name),
+                   version: $version,
+                   changelog: ""
+                 })
+             )
+          ' --argjson RELEASES "$RELEASES" talkman.json > tmp.json && mv tmp.json talkman.json
 
       - name: Commit updated talkman.json
         run: |
