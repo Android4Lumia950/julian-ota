@@ -10,7 +10,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          persist-credentials: true  # Needed to push changes
+          persist-credentials: true
 
       - name: Install dependencies
         run: |
@@ -21,7 +21,7 @@ jobs:
         run: |
           [ -f talkman.json ] || echo '{"response":[]}' > talkman.json
 
-      - name: Debug fetch releases and update talkman.json
+      - name: Fetch releases and update talkman.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: 18.1
@@ -39,7 +39,7 @@ jobs:
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" > releases.json
 
           echo "Fetched releases JSON:"
-          cat releases.json | jq '.'  # pretty-print
+          cat releases.json | jq '.'
           echo "----------------------"
 
           RELEASE_COUNT=$(jq length releases.json)
@@ -94,7 +94,7 @@ jobs:
           # Merge if there are new entries
           if [ "$NEW_JSON" != "[]" ]; then
             UPDATED_JSON=$(echo "$OLD_JSON" | jq --argjson new "$NEW_JSON" '.response = (.response // []) + $new')
-            echo "$UPDATED_JSON" > talkman.json
+            echo "$UPDATED_JSON" | jq -S . > talkman.json
             echo "talkman.json updated successfully."
           else
             echo "No new entries to add to talkman.json."
@@ -104,7 +104,17 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
+
+          # Normalize JSON formatting
+          jq -S . talkman.json > talkman.normalized.json
+          mv talkman.normalized.json talkman.json
+
           git add talkman.json
-          # Only commit if there are changes
-          git diff --cached --quiet || git commit -m "Update talkman.json from GitHub Release(s) [skip ci]"
-          git push
+
+          # Only commit if changes exist
+          if ! git diff --cached --quiet; then
+            git commit -m "Update talkman.json from GitHub Release(s) [skip ci]"
+            git push
+          else
+            echo "No changes detected, skipping commit."
+          fi
