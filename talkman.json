@@ -1,12 +1,13 @@
 {
   "response": [
     {
+      "datetime": 1761658812,
       "filename": "lineage-18.1-20251027-UNOFFICIAL-talkman.zip",
-      "download": "https://github.com/Android4Lumia950/julian-ota/releases/download/lineage-18.1-20251027-UNOFFICIAL-talkman/lineage-18.1-20251027-UNOFFICIAL-talkman.zip",
-      "timestamp": 1761483661,
-      "md5": "7a0e37fc031cb26b032122f977d0d4a5",
+      "id": "gaghf3a2e5j1b5lhels1tcj10ds6o8e2",
+      "romtype": "UNOFFICIAL",
       "size": 711502473,
-      "version": "1.2"
+      "url": "https://github.com/Android4Lumia950/julian-ota/releases/download/lineage-18.1-20251027-UNOFFICIAL-talkman/lineage-18.1-20251027-UNOFFICIAL-talkman.zip",
+      "version": "18.1"
     }
   ]
 }
