@@ -1,2 +1,6 @@
+22/05/2026:
+-Flashlight has been brought up! Thx to @sonic011gamer @djokcho @cocoshark_official
+
+
 11/05/2025:
 Fix the changelog url and introduce changelogs: Hello world?!
